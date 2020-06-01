@@ -1,4 +1,4 @@
-# direct-neural-calibration
+# direct and modest heston calibration
 
 direct_heston_calib.ipynb:
 Based on http://gouthamanbalaraman.com/blog/quantlib-python-tutorials-with-examples.html by Goutham Balaraman.
@@ -7,7 +7,7 @@ Given some volatilities, maturities and strikes, calibrates heston model paramet
 scipy optimization tools.
 
 
-neural_heston.ipynb:
+modest_heston.ipynb:
 Based on https://nbviewer.jupyter.org/url/people.math.ethz.ch/~jteichma/lecture_ml_web/heston_calibration.ipynb 
 by Matteo Gambara.
 
