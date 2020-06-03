@@ -30,41 +30,44 @@ d[W_t, B_t] = rho * dt
 where G^alpha is the Generalized Fractional Operator with alpha in (-1/2, 1/2).
 G^alpha can be understood as an operator, which transforms the Hölder-1/2 function to Hölder-(1/2+alpha) function
 and thus makes it 'rougher'.
-To model parameters one more parameter {alpha} is added.
+To model parameters one more parameter {alpha} is added. Moreover, another observable V_0 is added, which
+generally can be different from Y_0.
 For reference see "Functional Central Limit Theorems for Rough Volatility" by Horvath et al and "Asymptotic 
 Behaviour of the Fractional Heston Model" by Shi et al.
 """
 
 
-def simulate_rough_heston(n, m, terminal_time=1, log_spot_price=1, inst_var=0.1, mean_rev_speed=1, eq_var=0.1,
-                          vol_of_vol=0.01, correlation=0.1, alpha=0.):
+def simulate_rough_heston(n, m, terminal_time=1, log_spot_price=1, inst_vola=0.1, inst_vola_of_vola=0.1,
+                          mean_rev_speed=1, eq_var=0.1, vola_of_vola=0.01, correlation=0.1, alpha=0.):
     """
     n is number of time steps
     m is number of simulations
     """
     T = terminal_time
     X_0 = log_spot_price
-    Y_0 = inst_var
+    V_0 = inst_vola
+    Y_0 = inst_vola_of_vola
     kappa = mean_rev_speed
     theta = eq_var
-    sigma = vol_of_vol
+    sigma = vola_of_vola
     rho = correlation
 
     # todo(mgrillo,atukallo): what should be assert on parameters to guarantee V > 0 ? Should further debug, not
     #   production ready yet.
 
     Y, B = __simulate_heston_volatility(n, m, T, Y_0, kappa, theta, sigma)
-    V = __simulate_rough_volatility(n, m, T, alpha, Y)
+    V = __simulate_rough_volatility(n, m, T, V_0, alpha, Y)
     W = __get_correlated_bm(rho, B)
-    X = __simulate_heston_log_price(n, m, T, X_0, rho, V, W)
+    X = __simulate_heston_log_price(n, m, T, X_0, V, W)
 
     return X
 
 
 def __simulate_heston_volatility(n, m, T, Y_0, kappa, theta, sigma):
     """
-    Simulates volatility process Y_t and returns it together with its brownian motion W_t
+    Simulates volatility process Y_t and returns it together with its brownian motion B_t
     """
+    # todo(atukallo): use V_0 in code
     sqrtn = np.sqrt(n)
     vola = np.zeros((n, m))
     B = np.random.normal(0.0, 1.0, size=(n, m))
@@ -77,23 +80,24 @@ def __simulate_heston_volatility(n, m, T, Y_0, kappa, theta, sigma):
     return vola, B
 
 
-def __simulate_rough_volatility(n, m, T, alpha, Y):
+def __simulate_rough_volatility(n, m, T, V_0, alpha, Y):
     V = np.zeros((n, m))
     g_vector = np.array([np.power(1. * T * i / n, alpha) for i in range(1, n)])  # dropping 0th element
     vola_incrs = Y[1:] - Y[:-1]
 
-    V[0] = Y[0]
-    # todo(mgrillo,atukallo): introduce convolution, which is vectorized over m
+    V[0] = V_0
+    # todo(mgrillo,atukallo): if becomes a bottle neck, add vectorization
     for i in range(m):
         # documentation recommends using fft only for big arrays
         if n > 500:
-            V[1:, i] = signal.fftconvolve(g_vector, vola_incrs[:, i], 'same')
+            # V[1:, i] = V_0 + signal.fftconvolve(g_vector, vola_incrs[:, i], 'same')
+            V[1:, i] = V_0 + signal.fftconvolve(g_vector, vola_incrs[:, i], 'full')[0:n - 1]
         else:
-            V[1:, i] = signal.convolve(g_vector, vola_incrs[:, i], 'same')
+            V[1:, i] = V_0 + signal.convolve(g_vector, vola_incrs[:, i], 'full')[0:n - 1]
     return V
 
 
-def __simulate_heston_log_price(n, m, T, X_0, rho, V, W):
+def __simulate_heston_log_price(n, m, T, X_0, V, W):
     assert not np.any(np.isnan(V) | np.isnan(W))
     assert np.nanmin(V) > 0
 
@@ -114,7 +118,7 @@ def __get_correlated_bm(rho, B):
 
 """
 Rough SABR model has the following form for log-price:
-d X_t = V_t * L(t, X_t) * d W_t - 0.5 * (V_t)^2 * L(t, X_t)^2 * dt
+d X_t = - 0.5 * (V_t)^2 * L(t, X_t)^2 * dt + V_t * L(t, X_t) * d W_t
 V_t = (G^alpha Y)_t
 d Y_t = sigma * Y_t * d B_t
 d[W_t, B_t] = rho * dt
@@ -122,46 +126,47 @@ Thus SABR model combines rough stochastic and local volatility
 """
 
 
-def simulate_rough_SABR(n, m, terminal_time=1, log_spot_price=1, inst_var=0.1,
+def simulate_rough_SABR(n, m, terminal_time=1, log_spot_price=1, inst_vola=0.1, inst_vola_of_vola=0.1,
                         vol_of_vol=0.01, correlation=0.1, local_vola=lambda t, log_price: 1, alpha=0.):
     T = terminal_time
     X_0 = log_spot_price
-    Y_0 = inst_var
+    V_0 = inst_vola_of_vola
+    Y_0 = inst_vola
     sigma = vol_of_vol
     rho = correlation
     L = local_vola
 
     Y, B = __simulate_SABR_volatility(n, m, T, Y_0, sigma)
-    V = __simulate_rough_volatility(n, m, T, alpha, Y)
+    V = __simulate_rough_volatility(n, m, T, V_0, alpha, Y)
     W = __get_correlated_bm(rho, B)
-    X = __simulate_SABR_log_price(n, m, T, X_0, rho, L, V, W)
+    X = __simulate_SABR_log_price(n, m, T, X_0, L, V, W)
 
-    return X
+    return X, V, Y
 
 
 def __simulate_SABR_volatility(n, m, T, Y_0, sigma):
     """
-    Simulates volatility process Y_t and returns it together with its brownian motion W_t
+    Simulates volatility process Y_t and returns it together with its brownian motion B_t
     """
-    sqrtn = np.sqrt(n)
+    sqrt_step_size = np.sqrt(1. * T / n)
     vola = np.zeros((n, m))
     B = np.random.normal(0.0, 1.0, size=(n, m))
     vola[0] = Y_0
     for i in range(1, n):
-        # todo(atukallo): why T / sqrtn ?
+        # todo(atukallo,mgrillo): why T / sqrtn ? (see paper page 12, 2nd step of Algo 3.3, question forwarded to Wahid)
         vola[i] = vola[i - 1] \
-                  + (sigma * np.sqrt(vola[i - 1])) * (T / sqrtn) * B[i - 1]
+                  + (sigma * np.sqrt(vola[i - 1])) * sqrt_step_size * B[i - 1]
     return vola, B
 
 
-def __simulate_SABR_log_price(n, m, T, X_0, rho, L, V, W):
-    assert not np.any(np.isnan(V) | np.isnan(B))
+def __simulate_SABR_log_price(n, m, T, X_0, L, V, W):
+    assert not np.any(np.isnan(V) | np.isnan(W))
 
     X = np.zeros((n, m))
     X[0] = X_0
     for i in range(1, n):
         binded_L = np.vectorize(functools.partial(L, T * (i - 1) / n))
         X[i] = X[i - 1] \
-               - 0.5 * np.pow(V[i - 1], 2) * np.pow(binded_L(X[i - 1]), 2) * (T / n) \
+               - 0.5 * np.power(V[i - 1], 2) * np.power(binded_L(X[i - 1]), 2) * (T / n) \
                + V[i - 1] * np.sqrt(T / n) * W[i - 1]
     return X
