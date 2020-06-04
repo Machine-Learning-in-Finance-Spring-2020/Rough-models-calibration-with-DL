@@ -141,7 +141,7 @@ def simulate_rough_SABR(n, m, terminal_time=1, log_spot_price=1, inst_vola=0.1, 
     W = __get_correlated_bm(rho, B)
     X = __simulate_SABR_log_price(n, m, T, X_0, L, V, W)
 
-    return X, V, Y
+    return X
 
 
 def __simulate_SABR_volatility(n, m, T, Y_0, sigma):
