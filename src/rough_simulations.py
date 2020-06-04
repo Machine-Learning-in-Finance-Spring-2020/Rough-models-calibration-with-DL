@@ -127,12 +127,12 @@ Thus SABR model combines rough stochastic and local volatility
 
 
 def simulate_rough_SABR(n, m, terminal_time=1, log_spot_price=1, inst_vola=0.1, inst_vola_of_vola=0.1,
-                        vol_of_vol=0.01, correlation=0.1, local_vola=lambda t, log_price: 1, alpha=0.):
+                        vola_of_vola=0.01, correlation=0.1, local_vola=lambda t, log_price: 1, alpha=0.):
     T = terminal_time
     X_0 = log_spot_price
     V_0 = inst_vola_of_vola
     Y_0 = inst_vola
-    sigma = vol_of_vol
+    sigma = vola_of_vola
     rho = correlation
     L = local_vola
 
