@@ -6,9 +6,13 @@ by Horvath et al.
 Initial version of the code implemented by mgrillo, then refactored and standardized by atukallo
 """
 import numpy as np
+
 import functools
 
 from scipy import signal
+from warnings import warn
+
+from src.utils import *
 
 """
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Heston ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -29,12 +33,13 @@ d Y_t = (theta - kappa * Y_t) * dt + sigma * sqrt(Y_t) * d B_t
 d[W_t, B_t] = rho * dt
 where G^alpha is the Generalized Fractional Operator with alpha in (-1/2, 1/2).
 G^alpha can be understood as an operator, which transforms the Hölder-1/2 function to Hölder-(1/2+alpha) function
-and thus makes it 'rougher'.
+and thus changes its 'roughness'.
 To model parameters one more parameter {alpha} is added. Moreover, another observable V_0 is added, which
 generally can be different from Y_0.
 For reference see "Functional Central Limit Theorems for Rough Volatility" by Horvath et al and "Asymptotic 
 Behaviour of the Fractional Heston Model" by Shi et al.
 """
+# todo(mgrillo,atukallo): are both V_0 and Y_0 observables?
 
 
 def simulate_rough_heston(n, m, terminal_time=1, log_spot_price=1, inst_vola=0.1, inst_vola_of_vola=0.1,
@@ -81,6 +86,8 @@ def __simulate_heston_volatility(n, m, T, Y_0, kappa, theta, sigma):
 
 
 def __simulate_rough_volatility(n, m, T, V_0, alpha, Y):
+    assert -0.5 <= alpha <= 0.5, "alpha has disallowed value"
+
     V = np.zeros((n, m))
     g_vector = np.array([np.power(1. * T * i / n, alpha) for i in range(1, n)])  # dropping 0th element
     vola_incrs = Y[1:] - Y[:-1]
@@ -128,6 +135,10 @@ Thus SABR model combines rough stochastic and local volatility
 
 def simulate_rough_SABR(n, m, terminal_time=1, log_spot_price=1, inst_vola=0.1, inst_vola_of_vola=0.1,
                         vola_of_vola=0.01, correlation=0.1, local_vola=lambda t, log_price: 1, alpha=0.):
+    """
+    n is number of time steps
+    m is number of simulations
+    """
     T = terminal_time
     X_0 = log_spot_price
     V_0 = inst_vola_of_vola
@@ -141,7 +152,36 @@ def simulate_rough_SABR(n, m, terminal_time=1, log_spot_price=1, inst_vola=0.1, 
     W = __get_correlated_bm(rho, B)
     X = __simulate_SABR_log_price(n, m, T, X_0, L, V, W)
 
+    if np.any(np.isnan(X)):
+        warn(f'when simulating SABR got {np.count_nonzero(np.isnan(X))} nans!')
+
     return X
+
+
+def get_option_prices_rough_SABR(n, m, maturity_times, strike_prices, log_spot_price=1, inst_vola=0.1,
+                                 inst_vola_of_vola=0.1, vola_of_vola=0.01, correlation=0.1,
+                                 local_vola=lambda t, log_price: 1, alpha=0., call_option=True):
+    """
+    n is number of time steps
+    m is number of simulations
+    """
+
+    terminal_time = np.max(maturity_times)
+    log_stock = simulate_rough_SABR(n, m, terminal_time, log_spot_price, inst_vola, inst_vola_of_vola, vola_of_vola,
+                                    correlation, local_vola, alpha)
+    stock = np.exp(log_stock)
+
+    # todo(mgrillo): maybe we don't want to use strike price, but instead moneyness
+
+    option_price_f = call_price if call_option else put_price
+    option_prices = np.zeros((len(maturity_times), len(strike_prices)))
+
+    for i in range(len(maturity_times)):
+        time_index = int(maturity_times[i] * n / np.max(maturity_times)) - 1
+        for j in range(len(strike_prices)):
+            option_prices[i, j] = np.nanmean(option_price_f(stock[time_index], strike_prices[j]))
+
+    return option_prices
 
 
 def __simulate_SABR_volatility(n, m, T, Y_0, sigma):
