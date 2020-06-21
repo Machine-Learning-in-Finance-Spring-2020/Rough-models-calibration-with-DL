@@ -8,6 +8,7 @@ Initial version of the code implemented by mgrillo, then refactored and standard
 import numpy as np
 
 import functools
+import py_vollib.black_scholes.implied_volatility as vollib_iv
 
 from scipy import signal
 from warnings import warn
@@ -57,6 +58,7 @@ def simulate_rough_heston(n, m, terminal_time=1, log_spot_price=1, inst_vola=0.1
     sigma = vola_of_vola
     rho = correlation
 
+    warn('function is not tested yet, todo(mgrillo, atukallo)')
     # todo(mgrillo,atukallo): what should be assert on parameters to guarantee V > 0 ? Should further debug, not
     #   production ready yet.
 
@@ -158,13 +160,16 @@ def simulate_rough_SABR(n, m, terminal_time=1, log_spot_price=1, inst_vola=0.1, 
     return X
 
 
-def get_option_prices_rough_SABR(n, m, maturity_times, strike_prices, log_spot_price=1, inst_vola=0.1,
+def get_option_prices_rough_SABR(n, m, maturity_times, moneynesses, log_spot_price=0, inst_vola=0.1,
                                  inst_vola_of_vola=0.1, vola_of_vola=0.01, correlation=0.1,
-                                 local_vola=lambda t, log_price: 1, alpha=0., call_option=True):
+                                 local_vola=lambda t, log_price: 1, alpha=0., is_call_option=True):
     """
     n is number of time steps
     m is number of simulations
     """
+
+    spot_price = np.exp(log_spot_price)
+    strike_prices = [moneyness * spot_price for moneyness in moneynesses]
 
     terminal_time = np.max(maturity_times)
     log_stock = simulate_rough_SABR(n, m, terminal_time, log_spot_price, inst_vola, inst_vola_of_vola, vola_of_vola,
@@ -173,7 +178,7 @@ def get_option_prices_rough_SABR(n, m, maturity_times, strike_prices, log_spot_p
 
     # todo(mgrillo): maybe we don't want to use strike price, but instead moneyness
 
-    option_price_f = call_price if call_option else put_price
+    option_price_f = call_price if is_call_option else put_price
     option_prices = np.zeros((len(maturity_times), len(strike_prices)))
 
     for i in range(len(maturity_times)):
@@ -182,6 +187,27 @@ def get_option_prices_rough_SABR(n, m, maturity_times, strike_prices, log_spot_p
             option_prices[i, j] = np.nanmean(option_price_f(stock[time_index], strike_prices[j]))
 
     return option_prices
+
+
+def get_implied_vola_rough_SABR(n, m, maturity_times, moneynesses, log_spot_price=0, inst_vola=0.1,
+                                 inst_vola_of_vola=0.1, vola_of_vola=0.01, correlation=0.1,
+                                 local_vola=lambda t, log_price: 1, alpha=0., is_call_option=True):
+
+    option_prices = get_option_prices_rough_SABR(n, m, maturity_times, moneynesses, log_spot_price, inst_vola,
+                                 inst_vola_of_vola, vola_of_vola, correlation, local_vola, alpha, is_call_option)
+
+    # todo(atukallo): somehow often fails with "vola is below the intrinsic value"
+
+    spot_price = np.exp(log_spot_price)
+    strike_prices = [moneyness * spot_price for moneyness in moneynesses]
+    implied_volas = np.zeros(option_prices.shape)
+    flag = 'c' if is_call_option else 'p'
+    for i, maturity in enumerate(maturity_times):
+        for j, strike_price in enumerate(strike_prices):
+            print(option_prices[i][j], spot_price, strike_price, maturity, flag)
+            implied_volas[i][j] = vollib_iv.implied_volatility(price=option_prices[i][j], S=spot_price, K=strike_price,
+                                                               t=maturity, r=0, flag=flag)
+    return implied_volas
 
 
 def __simulate_SABR_volatility(n, m, T, Y_0, sigma):
